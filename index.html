@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fortnightly Pay Calculator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 750px;
+      margin: 30px auto;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    h2 {
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 15px;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+    }
+    select {
+      width: 100%;
+    }
+    input[type="checkbox"] {
+      transform: scale(1.2);
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #result, #summary, #super {
+      margin-top: 20px;
+      font-weight: bold;
+      white-space: pre-line;
+    }
+    #result, #super {
+      text-align: center;
+    }
+    .week-title {
+      margin-top: 30px;
+      font-size: 1.2em;
+      font-weight: bold;
+    }
+    .disclaimer {
+      text-align: center;
+      margin-top: 30px;
+      font-size: 0.9em;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h2>Fortnightly Pay Calculator</h2>
+
+  <div id="weeksContainer"></div>
+
+  <button onclick="calculateFortnightlyPay()">Calculate Total Pay</button>
+
+  <div id="result"></div>
+  <div id="super"></div>
+  <div id="summary"></div>
+
+  <div class="disclaimer">
+  <p><strong>Disclaimer:</strong> this is correct, securitas is wrong</p>
+
+</div>
+
+  <script>
+    const DAY_RATE = 35.98750;
+    const NIGHT_RATE = 42.23493;
+    const SATURDAY_RATE = 50.38250;
+    const SUNDAY_RATE = 64.77750;
+    const PUBLIC_HOLIDAY_RATE = 79.17250;
+    const SUPER_RATE = 0.115;
+
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const weeksContainer = document.getElementById('weeksContainer');
+
+    function generateTimeOptions() {
+      let options = '<option value="">--</option>';
+      options += `<option value="00:01">00:01</option>`;
+      for (let h = 0; h < 24; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          const hour = h.toString().padStart(2, '0');
+          const min = m.toString().padStart(2, '0');
+          const value = `${hour}:${min}`;
+          if (value !== "00:00") options += `<option value="${value}">${value}</option>`;
+        }
+      }
+      options += `<option value="23:59">23:59</option>`;
+      return options;
+    }
+
+    for (let week = 1; week <= 2; week++) {
+      const table = document.createElement('table');
+      const title = document.createElement('div');
+      title.className = 'week-title';
+      title.textContent = `Week ${week}`;
+      weeksContainer.appendChild(title);
+
+      let tableHTML = `
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Start Time</th>
+            <th>End Time</th>
+            <th>Public Holiday</th>
+          </tr>
+        </thead>
+        <tbody>
+      `;
+
+      days.forEach(day => {
+        const idPrefix = `Week${week}-${day}`;
+        tableHTML += `
+          <tr>
+            <td>${day}</td>
+            <td><select id="${idPrefix}-start">${generateTimeOptions()}</select></td>
+            <td><select id="${idPrefix}-end">${generateTimeOptions()}</select></td>
+            <td style="text-align:center;"><input type="checkbox" id="${idPrefix}-ph"></td>
+          </tr>
+        `;
+      });
+
+      tableHTML += '</tbody>';
+      table.innerHTML = tableHTML;
+      weeksContainer.appendChild(table);
+    }
+
+    function convertToDecimal(timeStr) {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return hours + minutes / 60;
+    }
+
+    function getNextDay(day) {
+      const index = days.indexOf(day);
+      return days[(index + 1) % 7];
+    }
+
+    function breakIntoHalfHours(start, end) {
+      const times = [];
+      let current = convertToDecimal(start);
+      let finish = convertToDecimal(end);
+      if (finish <= current) finish += 24;
+
+      while (current < finish) {
+        const h = Math.floor(current) % 24;
+        const m = current % 1 === 0.5 ? '30' : '00';
+        times.push({ hour: h, timeStr: `${h.toString().padStart(2, '0')}:${m}`, fullDecimal: current });
+        current += 0.5;
+      }
+
+      return times;
+    }
+
+    function calculatePAYGWithholding(fortnightlyEarnings) {
+      const thresholds = [
+        { min: 0, max: 359, base: 0, rate: 0 },
+        { min: 360, max: 439, base: 0, rate: 0.19 },
+        { min: 440, max: 1349, base: 15.02, rate: 0.325 },
+        { min: 1350, max: 3119, base: 207.97, rate: 0.37 },
+        { min: 3120, max: Infinity, base: 855.47, rate: 0.45 }
+      ];
+
+      let tax = 0;
+      for (let i = 0; i < thresholds.length; i++) {
+        const bracket = thresholds[i];
+        if (fortnightlyEarnings >= bracket.min && fortnightlyEarnings <= bracket.max) {
+          tax = bracket.base + (fortnightlyEarnings - bracket.min) * bracket.rate;
+          break;
+        }
+      }
+
+      const medicareLevy = fortnightlyEarnings * 0.02;
+      tax += medicareLevy;
+      return tax;
+    }
+
+    function calculateFortnightlyPay() {
+      let totalDayHours = 0;
+      let totalNightHours = 0;
+      let totalSaturdayHours = 0;
+      let totalSundayHours = 0;
+      let totalPublicHolidayHours = 0;
+
+      let payDay = 0;
+      let payNight = 0;
+      let paySat = 0;
+      let paySun = 0;
+      let payPH = 0;
+
+      for (let week = 1; week <= 2; week++) {
+        days.forEach(day => {
+          const idPrefix = `Week${week}-${day}`;
+          const start = document.getElementById(`${idPrefix}-start`).value;
+          const end = document.getElementById(`${idPrefix}-end`).value;
+          const isPH = document.getElementById(`${idPrefix}-ph`).checked;
+          const nextDay = getNextDay(day);
+          const nextDayPH = document.getElementById(`Week${week}-${nextDay}-ph`)?.checked;
+
+          if (start && end) {
+            const intervals = breakIntoHalfHours(start, end);
+            let shiftDay = 0, shiftNight = 0, shiftSat = 0, shiftSun = 0, shiftPH = 0;
+
+            intervals.forEach(t => {
+              const timeDec = t.fullDecimal % 24;
+              const effectiveDay = t.fullDecimal >= 24 ? nextDay : day;
+              const effectivePH = t.fullDecimal >= 24 ? nextDayPH : isPH;
+
+              if (effectivePH) {
+                shiftPH += 0.5;
+              } else if (effectiveDay === 'Saturday') {
+                shiftSat += 0.5;
+              } else if (effectiveDay === 'Sunday') {
+                shiftSun += 0.5;
+              } else {
+                if (timeDec >= 6 && timeDec < 18) shiftDay += 0.5;
+                else shiftNight += 0.5;
+              }
+            });
+
+            const shiftTotal = shiftDay + shiftNight + shiftSat + shiftSun + shiftPH;
+
+            if (shiftTotal >= 7) {
+              if (shiftPH >= 0.5 && shiftPH >= Math.max(shiftSat, shiftSun, shiftNight, shiftDay)) shiftPH -= 0.5;
+              else if (shiftSat >= 0.5 && shiftSat >= Math.max(shiftSun, shiftNight, shiftDay)) shiftSat -= 0.5;
+              else if (shiftSun >= 0.5 && shiftSun >= Math.max(shiftNight, shiftDay)) shiftSun -= 0.5;
+              else if (shiftNight >= 0.5 && shiftNight >= shiftDay) shiftNight -= 0.5;
+              else shiftDay -= 0.5;
+            }
+
+            totalDayHours += shiftDay;
+            totalNightHours += shiftNight;
+            totalSaturdayHours += shiftSat;
+            totalSundayHours += shiftSun;
+            totalPublicHolidayHours += shiftPH;
+
+            payDay += shiftDay * DAY_RATE;
+            payNight += shiftNight * NIGHT_RATE;
+            paySat += shiftSat * SATURDAY_RATE;
+            paySun += shiftSun * SUNDAY_RATE;
+            payPH += shiftPH * PUBLIC_HOLIDAY_RATE;
+          }
+        });
+      }
+
+      const totalGrossPay = payDay + payNight + paySat + paySun + payPH;
+      const fortnightlyTax = calculatePAYGWithholding(totalGrossPay);
+      const superOwed = totalGrossPay * SUPER_RATE;
+
+      document.getElementById('result').textContent =
+        `Total Hours: ${(totalDayHours + totalNightHours + totalSaturdayHours + totalSundayHours + totalPublicHolidayHours).toFixed(2)}\n` +
+        `Total Pay: $${totalGrossPay.toFixed(2)}`;
+
+      document.getElementById('super').textContent = `Super (11.5%): $${superOwed.toFixed(2)}`;
+
+      document.getElementById('summary').textContent =
+        `Breakdown by Rate:\n\n` +
+        `N1-C (Day $${DAY_RATE.toFixed(5)}):      ${totalDayHours.toFixed(2)} hrs  | $${payDay.toFixed(5)}\n` +
+        `N2-C (Night $${NIGHT_RATE.toFixed(5)}):   ${totalNightHours.toFixed(2)} hrs | $${payNight.toFixed(5)}\n` +
+        `N3-C (Sat $${SATURDAY_RATE.toFixed(5)}):  ${totalSaturdayHours.toFixed(2)} hrs | $${paySat.toFixed(5)}\n` +
+        `N4-C (Sun $${SUNDAY_RATE.toFixed(5)}):   ${totalSundayHours.toFixed(2)} hrs | $${paySun.toFixed(5)}\n` +
+        `N5-C (Public $${PUBLIC_HOLIDAY_RATE.toFixed(5)}):  ${totalPublicHolidayHours.toFixed(2)} hrs | $${payPH.toFixed(5)}`;
+    }
+  </script>
+</body>
+</html>
